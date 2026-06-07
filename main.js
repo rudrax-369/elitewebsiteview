@@ -10,12 +10,15 @@ gsap.registerPlugin(ScrollTrigger);
 // STATE MANAGEMENT & CONSTANTS
 // ==========================================
 const TOTAL_FRAMES = 240;
-const images = [];
+const images = new Array(TOTAL_FRAMES).fill(null);
 let currentFrameIndex = 0;
 let isLoaded = false;
 let scrollSpeed = 0;
 let targetScrollSpeed = 0;
 let isWarping = false;
+
+// BASE URL for assets (works on GH Pages subpath)
+const BASE = import.meta.env.BASE_URL;
 
 // Element Selectors
 const preloaderEl = document.getElementById('preloader');
@@ -99,87 +102,99 @@ gsap.ticker.lagSmoothing(0);
 
 // ==========================================
 // PRELOADER & IMAGE LOADING MANAGER
+// Fast strategy:
+//  1. Load frame 1 instantly → show immediately
+//  2. Load 20 keyframes spread across timeline → unlock scroll
+//  3. Fill remaining in background with concurrency=6
 // ==========================================
-const preloadImages = () => {
-  let loadedCount = 0;
-  
-  statusEl.textContent = "SYNCHRONIZING SPACETIME CORE...";
-  
-  // Create first frame image object to draw immediately
-  const BASE = import.meta.env.BASE_URL;
-  const firstFrameSrc = `${BASE}ezgif-696aee2f9bbf4735-png-split/ezgif-frame-001.png`;
-  const firstImg = new Image();
-  firstImg.src = firstFrameSrc;
-  firstImg.onload = () => {
-    images[0] = firstImg;
-    resizeCanvas();
-    renderFrame(0);
-    loadRemaining();
-  };
-  
-  firstImg.onerror = () => {
-    console.error("Failed to load initial frame. Retrying...");
-    loadRemaining();
-  };
+const CONCURRENCY = 6;
+const MIN_FRAMES_TO_START = 20;
+let loadedCount = 0;
 
-  function loadRemaining() {
-    for (let i = 1; i <= TOTAL_FRAMES; i++) {
-      const img = new Image();
-      const frameNum = padZero(i);
-      img.src = `${BASE}ezgif-696aee2f9bbf4735-png-split/ezgif-frame-${frameNum}.png`;
-      
-      img.onload = () => {
-        images[i - 1] = img;
-        loadedCount++;
-        updateProgress(loadedCount);
-      };
-      
-      img.onerror = () => {
-        // Fallback or skip
-        loadedCount++;
-        updateProgress(loadedCount);
-      };
+function loadImage(frameNum) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const padded = padZero(frameNum);
+    img.src = `${BASE}frames/frame-${padded}.webp`;
+    img.onload = () => {
+      images[frameNum - 1] = img;
+      loadedCount++;
+      updateProgress(loadedCount);
+      resolve(img);
+    };
+    img.onerror = () => {
+      loadedCount++;
+      updateProgress(loadedCount);
+      resolve(null);
+    };
+  });
+}
+
+async function loadBatch(frameNums, concurrency) {
+  let idx = 0;
+  async function worker() {
+    while (idx < frameNums.length) {
+      const n = frameNums[idx++];
+      await loadImage(n);
     }
   }
+  await Promise.all(Array.from({ length: concurrency }, worker));
+}
+
+const preloadImages = async () => {
+  statusEl.textContent = "SYNCHRONIZING SPACETIME CORE...";
+
+  // Step 1: Load frame 1 immediately and show it
+  await loadImage(1);
+  resizeCanvas();
+  renderFrame(0);
+
+  // Step 2: Load keyframes spread across the timeline (every 12th = 20 frames)
+  const keyframes = [];
+  for (let i = 12; i <= TOTAL_FRAMES; i += 12) keyframes.push(i);
+  await loadBatch(keyframes, CONCURRENCY);
+
+  // Unlock scroll once keyframes are ready — user can start exploring
+  if (!isLoaded) completePreload();
+
+  // Step 3: Fill in all remaining frames in the background
+  const remaining = [];
+  for (let i = 1; i <= TOTAL_FRAMES; i++) {
+    if (!images[i - 1]) remaining.push(i);
+  }
+  await loadBatch(remaining, CONCURRENCY);
 };
 
-const updateProgress = (loadedCount) => {
-  const percent = Math.min(100, Math.floor((loadedCount / TOTAL_FRAMES) * 100));
+const updateProgress = (count) => {
+  const percent = Math.min(100, Math.floor((count / TOTAL_FRAMES) * 100));
   percentEl.textContent = `${padZero(percent, 2)}%`;
   progressBarEl.style.width = `${percent}%`;
-  
-  // Cyber status text updates based on percentage
-  if (percent < 25) {
+
+  if (percent < 10) {
     statusEl.textContent = "CALIBRATING QUANTUM INERTIA...";
-  } else if (percent < 50) {
+  } else if (percent < 30) {
     statusEl.textContent = "PRE-HEATING STELLAR SCANNER...";
-  } else if (percent < 75) {
+  } else if (percent < 60) {
     statusEl.textContent = "WARPING COGNITIVE BUFFER...";
-  } else if (percent < 99) {
+  } else if (percent < 90) {
     statusEl.textContent = "STABILIZING FORCE FIELD...";
   } else {
     statusEl.textContent = "NAVIGATION READY.";
-    setTimeout(completePreload, 800);
   }
 };
 
 const completePreload = () => {
   if (isLoaded) return;
   isLoaded = true;
-  
+
   preloaderEl.classList.add('fade-out');
-  
-  // Enable scrolling
   lenis.start();
-  
-  // Fade in HUD & Content elements
+
   gsap.to('.hud-container', { opacity: 1, duration: 1.5, delay: 0.5 });
   gsap.to('#scroll-prompt', { opacity: 1, duration: 1, delay: 1 });
-  
-  // Activate initial section content
+
   document.querySelector('#section-1 .section-content').classList.add('active');
-  
-  // Set up resize listener
+
   window.addEventListener('resize', resizeCanvas);
   resizeCanvas();
 };
@@ -188,7 +203,14 @@ const completePreload = () => {
 // CANVAS PLAYER & SCROLL SYNCHRONIZATION
 // ==========================================
 function renderFrame(index) {
-  const img = images[index];
+  // Find nearest loaded frame if this one isn't ready yet
+  let img = images[index];
+  if (!img) {
+    for (let d = 1; d < images.length; d++) {
+      if (images[index - d]) { img = images[index - d]; break; }
+      if (images[index + d]) { img = images[index + d]; break; }
+    }
+  }
   if (!img) return;
   
   const canvasWidth = window.innerWidth;
