@@ -106,7 +106,8 @@ const preloadImages = () => {
   statusEl.textContent = "SYNCHRONIZING SPACETIME CORE...";
   
   // Create first frame image object to draw immediately
-  const firstFrameSrc = `./ezgif-696aee2f9bbf4735-png-split/ezgif-frame-001.png`;
+  const BASE = import.meta.env.BASE_URL;
+  const firstFrameSrc = `${BASE}ezgif-696aee2f9bbf4735-png-split/ezgif-frame-001.png`;
   const firstImg = new Image();
   firstImg.src = firstFrameSrc;
   firstImg.onload = () => {
@@ -125,7 +126,7 @@ const preloadImages = () => {
     for (let i = 1; i <= TOTAL_FRAMES; i++) {
       const img = new Image();
       const frameNum = padZero(i);
-      img.src = `./ezgif-696aee2f9bbf4735-png-split/ezgif-frame-${frameNum}.png`;
+      img.src = `${BASE}ezgif-696aee2f9bbf4735-png-split/ezgif-frame-${frameNum}.png`;
       
       img.onload = () => {
         images[i - 1] = img;
